@@ -28,7 +28,7 @@ MOVE        = $0341             ; The current move (5 bytes)
 PACKED      = $0346             ; The packed current move (3 bytes)
 WORD_PTR    = $fa               ; Word pointer (2 bytes)
 P_RAND      = $0349             ; Pseudorandom seed (2 bytes)
-MATCH       = $034b             ; The current letters matched between WORD and MOVE (5 bytes)
+MATCH       = $034b             ; The letters that match in same position between WORD and MOVE (5 bytes)
 USED        = $0350             ; The current letters used in WORD (5 bytes)
 RNDNUM      = $0b               ; Random number tmp
 TMP         = $fc               ; Temporary pointer (2 bytes)
@@ -211,38 +211,39 @@ Submit:     lda POSITION        ; Is the cursor in the last position?
             lda MOVE,y          ;   go back for more input
             beq to_main         ;   ,,
             jsr Validate        ; Make sure the word is in the word list
-            bcs Eval
+            bcs Evaluate
             lda #15             ; This is an invalid word. Turn the border
             sta $900f           ;   color yellow for a few jiffies
             jmp wait            ; And go back for more input (a new word, etc.)
 
-; Evaluate Move
-; Correct letters in correct positions are green
-; Correct letters in incorrect positions are yellow
-Eval:       lda #0
-            sta SCORE           ; Set number of matches in same position to 0
+; Evaluate move
+; SCORE represents the number of letters that match in same position between WORD and MOVE
+; E.g. 1, if WORD=GUESS and MOVE=GUESS then SCORE=5 - this is a win
+; E.g. 2, if WORD=GUESS and MOVE=GUEST then SCORE=4
+; E.g. 3, if WORD=GUESS and MOVE=GRASS then SCORE=3
+; E.g. 4, if WORD=GUESS and MOVE=GOOSE then SCORE=2
+; E.g. 5, if WORD=GUESS and MOVE=GAUZE then SCORE=1
+; E.g. 6, if WORD=GUESS and MOVE=FAZED then SCORE=0
+Evaluate:   lda #0
+            sta SCORE
 
-; Initialize MATCH and USED arrays
+; Initialize
             ldy #0
--loop:      sta MATCH,y
+Initialize: sta MATCH,y
             sta USED,y
             iny
             cpy #6
-            bne loop
+            bne Initialize
 
-; Check for matching letters in WORD and MOVE
-; Copy matching letters to MATCH
-; WORD is W,E,E,P,S
-; MOVE is S,W,E,E,P
-; MATCH before loop is 0,0,0,0,0
-; MATCH after loop is 0,0,E,0,0
-; Remove letters in MOVE from helper alphabet
+; Check for letters that match in same position between WORD and MOVE and record in MATCH
+; E.g. if WORD=WEEPS and MOVE=SWEEP then MATCH=00E00
+; Change color of used letters in helper alphabet to red
             ldy #0
 -loop:      lda MOVE,y
             and #$3F
             tax
-            lda #" "
-            sta DISPLAY+$1000,x
+            lda #4
+            sta DISPLAY+$9400,x
             lda MOVE,y
             cmp WORD,y
             bne loopend
@@ -253,10 +254,12 @@ Eval:       lda #0
 loopend:    iny
             cpy #5
             bne loop
+
 ; Check for win
             lda SCORE
             cmp #5
             beq Winner
+
 ; Check for out of position matching letters in WORD and MOVE
 ; Skip prior matches i.e. letters in MATCH, letters is USED
 ; Copy matching letters to USED
@@ -292,11 +295,13 @@ loopend1:   inx
 loopend2:   iny
             cpy #5
             bne loopa
+
 ; Check for end of moves
             inc MOVENUM
             lda MOVENUM
             cmp #6
             beq Loser
+
 ; Reset for next move
             lda #0
             sta POSITION
