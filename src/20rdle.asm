@@ -28,6 +28,8 @@ MOVE        = $0341             ; The current move (5 bytes)
 PACKED      = $0346             ; The packed current move (3 bytes)
 WORD_PTR    = $fa               ; Word pointer (2 bytes)
 P_RAND      = $0349             ; Pseudorandom seed (2 bytes)
+MATCH       = $034b             ; The current letters matched between WORD and MOVE (5 bytes)
+USED        = $0350             ; The current letters used in WORD (5 bytes)
 RNDNUM      = $0b               ; Random number tmp
 TMP         = $fc               ; Temporary pointer (2 bytes)
 CUR_FIRST   = $fe
@@ -216,35 +218,88 @@ Submit:     lda POSITION        ; Is the cursor in the last position?
 
 ; Evaluate Move
 ; Correct letters in correct positions are green
-; Correct letters in incorrect positions are yellow            
-Eval:       lda #0              ; Reset the score, the number of green positions
-            sta SCORE           ; ,,
-            ldy #0              ; Y = position
--loop:      lda MOVE,y          ; Remove the letter from the helper display
-            and #$3f            ; ,,
-            tax                 ; ,,
-            lda #" "            ; ,,
-            sta DISPLAY+$1000,x ; ,,
-            lda MOVE,y          ; Get the move at the position
-            cmp WORD,y          ; Is it the same as the word at this position?
-            beq Green           ; If so, light it up green
-            ldx #4              ; Search for the letter anywhere else
-in_puzz:    cmp WORD,x          ;   It's okay to search the same position
-            beq Yellow          ;   again because the green check handles it
-            dex                 ;   ,,
-            bpl in_puzz         ;   ,,
-next_pos:   iny                 ; Go to the next position
+; Correct letters in incorrect positions are yellow
+Eval:       lda #0
+            sta SCORE           ; Set number of matches in same position to 0
+
+; Initialize MATCH and USED arrays
+            ldy #0
+-loop:      sta MATCH,y
+            sta USED,y
+            iny
+            cpy #6
+            bne loop
+
+; Check for matching letters in WORD and MOVE
+; Copy matching letters to MATCH
+; WORD is W,E,E,P,S
+; MOVE is S,W,E,E,P
+; MATCH before loop is 0,0,0,0,0
+; MATCH after loop is 0,0,E,0,0
+; Remove letters in MOVE from helper alphabet
+            ldy #0
+-loop:      lda MOVE,y
+            and #$3F
+            tax
+            lda #" "
+            sta DISPLAY+$1000,x
+            lda MOVE,y
+            cmp WORD,y
+            bne loopend
+            sta MATCH,y
+            inc SCORE
+            lda #30
+            jsr SetColor
+loopend:    iny
             cpy #5
-            bne loop            ;   and loop, if necessary
-            lda SCORE           ; If the player got all five, the game is over
-            cmp #5              ; ,,
-            beq Winner          ; ,,
-            inc MOVENUM         ; Increment the move number. If it's reached the
-            lda MOVENUM         ;   seventh move, the game is over       
-            cmp #6              ;   ,,
-            beq Loser           ;   ,,
-            lda #0              ; Reset the position for the next move
-            sta POSITION        ; ,,
+            bne loop
+; Check for win
+            lda SCORE
+            cmp #5
+            beq Winner
+; Check for out of position matching letters in WORD and MOVE
+; Skip prior matches i.e. letters in MATCH, letters is USED
+; Copy matching letters to USED
+; WORD is W,E,E,P,S
+; MOVE is S,W,E,E,P
+; MATCH is 0,0,E,0,0
+; USED before loop is 0,0,0,0,0
+; USED after S is processed is 0,0,0,0,S
+; USED after W is processed is W,0,0,0,S
+; USED after E is skipped is W,0,0,0,S
+; USED after E is processed is W,0,0,E,S
+; USED after P is processed is W,E,0,P,S
+            ldy #0
+-loopa:     lda MATCH,y
+            bne loopend2
+            ldx #0
+-loopb:     lda MATCH,x
+            bne loopend1
+            lda USED,x
+            bne loopend1
+            lda WORD,x
+            cmp MOVE,y
+            bne loopend1
+            sta USED,x
+            lda #158
+            stx TMP
+            jsr SetColor
+            ldx TMP
+            jmp loopend2
+loopend1:   inx
+            cpx #5
+            bne loopb
+loopend2:   iny
+            cpy #5
+            bne loopa
+; Check for end of moves
+            inc MOVENUM
+            lda MOVENUM
+            cmp #6
+            beq Loser
+; Reset for next move
+            lda #0
+            sta POSITION
             jmp Main
 
 ; Handle Game Over Stuff
@@ -275,11 +330,7 @@ Winner:     lda #13             ; Set screen border to green if won
             jmp Begin           ; Start the game over
 
 ; Handle Indicators            
-Green:      inc SCORE           ; Increment the score for a green position
-            lda #30             ; ,,
-            .byte $3c           ; (Skip the next word)
-Yellow:     lda #158            ; ,,
-            pha                 ; Save the color
+SetColor:   pha                 ; Save the color
             sty POSITION        ; Save Y
             jsr Pos             ; Position the cursor
             pla                 ; Get back the color
@@ -291,8 +342,8 @@ Yellow:     lda #158            ; ,,
             jsr CHROUT          ; ,,
             lda #146            ; Reverse off
             jsr CHROUT          ; ,,
-            jmp next_pos
-                   
+            rts
+
 ; Increment Word Pointer          
 IncPtr:     lda #3              ; Each word record takes three bytes, so add
             clc                 ;   3 to the word pointer
